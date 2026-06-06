@@ -1,0 +1,6 @@
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', () => clients.claim());
+
+self.addEventListener('notificationclick', (event) => {
+    event.notification.close();
+});
