@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guardián de Móvil</title>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#ef4444">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .radar-pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { box-shadow: 0 0 0 20px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-white min-h-screen flex flex-col items-center justify-center p-6">
+
+    <div id="appCard" class="max-w-md w-full bg-gray-900 border-2 border-gray-800 rounded-[3rem] p-10 text-center transition-all duration-500">
+        <div id="statusIcon" class="text-8xl mb-6">📱</div>
+        
+        <h1 class="text-3xl font-black mb-2 italic">ANTI-OLVIDO</h1>
+        <p id="subText" class="text-gray-500 text-sm mb-8">Vigilaré que no dejes tu móvil atrás</p>
+
+        <div class="relative inline-block mb-10">
+            <div id="radar" class="w-32 h-32 rounded-full border-4 border-blue-500 flex items-center justify-center">
+                <span id="statusText" class="text-xs font-bold text-blue-400">OFF</span>
+            </div>
+        </div>
+
+        <button id="connectBtn" class="w-full bg-blue-600 hover:bg-blue-500 py-5 rounded-2xl font-bold text-lg shadow-lg shadow-blue-900/40 transition-transform active:scale-95">
+            VINCULAR RELOJ
+        </button>
+
+        <button id="stopBtn" class="hidden w-full bg-red-600 hover:bg-red-500 py-5 rounded-2xl font-bold text-lg animate-pulse">
+            DETENER ALARMA
+        </button>
+
+        <div id="log" class="mt-6 text-[10px] text-gray-600 font-mono uppercase tracking-widest"></div>
+    </div>
+
+    <!-- Sonido de alarma real y fuerte -->
+    <audio id="alarmSound" loop>
+        <source src="https://actions.google.com/sounds/v1/alarms/emergency_itunes.ogg" type="audio/ogg">
+    </audio>
+
+    <script>
+        let device = null;
+        let isAlarming = false;
+        let reconnectTimeout = null;
+
+        const connectBtn = document.getElementById('connectBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusText = document.getElementById('statusText');
+        const radar = document.getElementById('radar');
+        const log = document.getElementById('log');
+        const alarmSound = document.getElementById('alarmSound');
+        const appCard = document.getElementById('appCard');
+
+        // Registro de Service Worker para PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js');
+        }
+
+        connectBtn.addEventListener('click', async () => {
+            try {
+                log.textContent = "Buscando dispositivo...";
+                device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: ['battery_service']
+                });
+
+                device.addEventListener('gattserverdisconnected', onDisconnect);
+                await connect();
+            } catch (err) {
+                log.textContent = "Error: " + err.message;
+            }
+        });
+
+        async function connect() {
+            log.textContent = "Conectando...";
+            await device.gatt.connect();
+            
+            // Éxito: El móvil está vigilando al reloj
+            statusText.textContent = "VIGILANDO";
+            statusText.className = "text-xs font-bold text-green-400";
+            radar.classList.add('radar-pulse', 'border-green-500');
+            connectBtn.classList.add('hidden');
+            log.textContent = "Vínculo establecido";
+            appCard.classList.add('border-green-900');
+        }
+
+        function onDisconnect() {
+            if (isAlarming) return;
+            
+            log.textContent = "Señal perdida. Reintentando...";
+            statusText.textContent = "BUSCANDO...";
+            
+            // DAMOS 10 SEGUNDOS DE GRACIA PARA EVITAR FALSAS ALARMAS
+            reconnectTimeout = setTimeout(async () => {
+                try {
+                    log.textContent = "Intentando reconexión crítica...";
+                    await device.gatt.connect();
+                    log.textContent = "Reconexión exitosa.";
+                    statusText.textContent = "VIGILANDO";
+                } catch (e) {
+                    triggerAlarm();
+                }
+            }, 10000); 
+        }
+
+        function triggerAlarm() {
+            isAlarming = true;
+            statusText.textContent = "¡ALERTA!";
+            statusText.className = "text-xs font-bold text-red-500";
+            radar.classList.replace('border-green-500', 'border-red-500');
+            appCard.classList.replace('border-green-900', 'border-red-600');
+            
+            stopBtn.classList.remove('hidden');
+            
+            // EL MÓVIL GRITA: Sonido máximo y vibración
+            alarmSound.play();
+            if (navigator.vibrate) {
+                navigator.vibrate([1000, 500, 1000, 500, 1000, 500, 1000]);
+            }
+
+            // ENVIAR NOTIFICACIÓN (Si el reloj aún tiene un hilo de conexión, vibrará)
+            if (Notification.permission === "granted") {
+                navigator.serviceWorker.ready.then(reg => {
+                    reg.showNotification("⚠️ ¡TE OLVIDAS EL MÓVIL!", {
+                        body: "Se ha perdido la conexión con el dispositivo.",
+                        requireInteraction: true,
+                        vibrate: [1000, 500, 1000]
+                    });
+                });
+            }
+        }
+
+        stopBtn.addEventListener('click', () => {
+            isAlarming = false;
+            alarmSound.pause();
+            alarmSound.currentTime = 0;
+            clearTimeout(reconnectTimeout);
+            location.reload(); // Reiniciar sistema
+        });
+
+        // Pedir permiso de notificación al inicio
+        Notification.requestPermission();
+    </script>
+</body>
+</html>
